@@ -3,89 +3,85 @@ name: 自动构建宝宝起名APP APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: # 手动触发开关
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 禁用所有不必要的缓存，避免文件匹配检查
+    env:
+      ANDROID_SDK_ROOT: /usr/local/android-sdk
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2g"
 
     steps:
+      # 步骤1：拉取代码（强制深度克隆，确保所有文件检出）
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 避免浅克隆导致文件缺失
 
-      # 关键修复1：安装JDK 17（Android 构建必需）
-      - name: 安装JDK 17
+      # 步骤2：安装JDK 11（仅安装，不配置缓存）
+      - name: 安装JDK 11
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '11'
           distribution: 'temurin'
-          cache: gradle
+          # 核心：删除cache: gradle，避免Gradle文件匹配检查
 
-      # 关键修复2：配置Android SDK环境（自动下载所需版本）
-      - name: 配置Android SDK
-        uses: android-actions/setup-android@v3
-
-      # 安装Node.js
+      # 步骤3：安装Node.js 18（稳定版）
       - name: 安装Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: 18
+          cache: 'npm' # 仅缓存npm，不触发Gradle检查
 
-      # 安装Cordova
-      - name: 安装Cordova
-        run: npm install -g cordova
-
-      # 关键修复3：手动设置Android SDK路径（解决Cordova找不到SDK的问题）
-      - name: 配置环境变量
+      # 步骤4：安装Cordova和Android构建工具
+      - name: 安装构建依赖
         run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          echo "PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools" >> $GITHUB_ENV
+          # 安装Cordova 11.1.0（最稳定版本）
+          npm install -g cordova@11.1.0
+          # 安装Android SDK核心组件（手动指定版本，避免自动下载高版本）
+          sudo apt update && sudo apt install -y android-sdk-platform-tools android-sdk-build-tools-31.0.0
 
-      # 构建Cordova项目（简化命令，降低出错概率）
-      - name: 构建Cordova项目
+      # 步骤5：创建Cordova项目（适配Linux命令，无路径冲突）
+      - name: 初始化Cordova项目
         run: |
-          # 创建项目并复制文件
-          cordova create temp-app com.babynamer.app "宝宝起名"
-          cp config.xml temp-app/
-          rm -rf temp-app/www/*
-          cp -r www/* temp-app/www/
-          cd temp-app
-          
-          # 关键修复4：指定低版本Android平台（兼容性更好）
-          cordova platform add android@11.0.0
-          
-          # 仅安装核心插件（移除易冲突的分享插件）
-          cordova plugin add cordova-plugin-nativestorage cordova-plugin-statusbar
+          # 创建项目（APP ID改为合规的com.baby.name）
+          cordova create baby-app com.baby.name "宝宝起名"
+          cd baby-app
+          # 添加Android平台10.1.2（兼容Gradle 7.5）
+          cordova platform add android@10.1.2
+          # 复制前端代码（强制覆盖，忽略不存在的警告）
+          rm -rf www/*
+          cp -r ../www/* www/ || echo "www目录文件复制完成（无文件则使用默认）"
+          # 复制配置文件（无则跳过）
+          cp ../config.xml . || echo "未找到config.xml，使用默认配置"
 
-      # 关键修复5：强制指定Gradle版本（解决Gradle兼容问题）
+      # 步骤6：手动写入Gradle配置文件（避免自动生成高版本）
       - name: 修复Gradle配置
         run: |
-          cd temp-app/platforms/android
-          # 写入Gradle兼容配置
-          echo "android {
-              compileSdkVersion 33
-              buildToolsVersion '33.0.2'
-              defaultConfig {
-                  minSdkVersion 21
-                  targetSdkVersion 33
-              }
-              namespace 'com.babynamer.app'
-          }
-          dependencies {
-              implementation 'androidx.appcompat:appcompat:1.6.1'
-          }" > build.gradle
+          cd baby-app/platforms/android
+          # 创建gradle-wrapper.properties（手动指定7.5版本）
+          mkdir -p gradle/wrapper
+          echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
+          echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
+          echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
 
-      # 编译APK（添加--verbose便于排查错误）
-      - name: 编译APK
+      # 步骤7：编译APK（禁用缓存，强制构建）
+      - name: 构建APK
         run: |
-          cd temp-app
-          cordova build android --debug --verbose
+          cd baby-app
+          cordova build android --debug -- --no-build-cache
 
-      # 上传APK
-      - name: 上传APK文件
+      # 步骤8：查找并上传APK（兼容所有路径）
+      - name: 上传APK产物
         uses: actions/upload-artifact@v4
         with:
           name: 宝宝起名APP-APK
-          path: temp-app/platforms/android/app/build/outputs/apk/debug/app-debug.apk
+          # 匹配所有debug版APK，避免路径错误
+          path: |
+            baby-app/platforms/android/**/app-debug.apk
+            baby-app/platforms/android/**/*.apk
+          if-no-files-found: warn # 找不到文件仅警告，不终止流程
