@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="com.babynamer.app" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>宝宝起名</name>
+    <description>为宝宝提供个性化起名服务</description>
+    <author email="your@email.com" href="https://github.com/你的用户名">你的名字</author>
+    <content src="index.html" />
+    <access origin="*" />
+    <preference name="Orientation" value="portrait" />
+    <preference name="Fullscreen" value="false" />
+    <platform name="android">
+        <allow-intent href="market:*" />
+        <!-- 简化图标配置（无图标也可构建，仅影响美观） -->
+        <preference name="android-minSdkVersion" value="21" /> <!-- 兼容Android 5.0+ -->
+    </platform>
+</widget>
