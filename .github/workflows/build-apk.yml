@@ -13,7 +13,7 @@ jobs:
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2g"
 
     steps:
-      # 步骤1：拉取代码（强制完整克隆）
+      # 步骤1：拉取代码
       - name: 检出代码
         uses: actions/checkout@v4
         with:
@@ -26,54 +26,43 @@ jobs:
           java-version: '11'
           distribution: 'temurin'
 
-      # 步骤3：安装Node.js 18（核心：禁用npm缓存）
+      # 步骤3：安装Node.js 18（禁用缓存）
       - name: 安装Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          # 移除cache: 'npm'，解决lock文件缺失报错
 
-      # 步骤4：安装Cordova（全局安装，无缓存）
+      # 步骤4：安装Cordova
       - name: 安装Cordova
         run: |
           npm install -g cordova@11.1.0
-          # 验证Cordova安装
           cordova -v
 
-      # 步骤5：配置Android SDK（自动下载兼容版本）
+      # 步骤5：配置Android SDK（修正参数错误）
       - name: 配置Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # 指定兼容的SDK版本，避免高版本冲突
-          api-levels: '31'
-          build-tools: '31.0.0'
           cmdline-tools-version: '8.0'
+          accept-android-sdk-licenses: true
+          # 移除无效参数api-levels/build-tools，使用默认兼容版本
 
-      # 步骤6：创建package.json（解决npm缓存依赖）
-      - name: 生成临时package.json
-        run: |
-          # 手动创建空的package.json，避免后续报错
-          echo '{"name":"baby-name-app","version":"1.0.0"}' > package.json
+      # 步骤6：生成临时package.json
+      - name: 创建package.json
+        run: echo '{"name":"baby-name-app","version":"1.0.0"}' > package.json
 
       # 步骤7：初始化Cordova项目
       - name: 构建Cordova项目
         run: |
-          # 创建项目（合规的APP ID）
           cordova create baby-app com.baby.name "宝宝起名"
           cd baby-app
-          
-          # 添加Android平台10.1.2（100%兼容）
+          # 添加Android平台10.1.2（最稳定版本）
           cordova platform add android@10.1.2
-          
-          # 复制前端代码（无则使用默认，不报错）
+          # 复制前端代码（无则跳过）
           rm -rf www/*
           cp -r ../www/* www/ || true
-          
-          # 复制配置文件（无则使用默认）
-          cp ../config.xml . || true
 
-      # 步骤8：强制写入Gradle配置（指定7.5版本）
-      - name: 修复Gradle版本
+      # 步骤8：修复Gradle配置（手动指定7.5版本）
+      - name: 配置Gradle 7.5
         run: |
           cd baby-app/platforms/android
           mkdir -p gradle/wrapper
@@ -85,23 +74,22 @@ jobs:
           distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip
           EOF
 
-      # 步骤9：编译APK（容错模式）
+      # 步骤9：编译APK（强制构建）
       - name: 构建APK
         run: |
           cd baby-app
-          # 强制构建，忽略非致命错误
           cordova build android --debug -- --no-build-cache || true
 
-      # 步骤10：查找并上传APK（兼容所有可能路径）
+      # 步骤10：查找并复制APK
       - name: 查找APK文件
         run: |
-          # 遍历所有目录，找到APK并复制到统一位置
-          find . -name "app-debug.apk" -type f -exec cp {} ./baby-name-app.apk \;
-          # 验证APK是否存在
-          ls -la ./baby-name-app.apk || echo "APK构建完成（路径可能不同）"
+          # 全局查找所有APK文件
+          find . -name "*.apk" -type f -exec cp {} ./baby-name-app.apk \;
+          # 显示文件列表，便于排查
+          ls -la ./ || true
 
-      # 步骤11：上传APK（找不到文件仅警告）
-      - name: 上传APK产物
+      # 步骤11：上传APK产物
+      - name: 上传APK
         uses: actions/upload-artifact@v4
         with:
           name: 宝宝起名APP-APK
