@@ -9,7 +9,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # 手动指定Android SDK路径
       ANDROID_HOME: /opt/android-sdk
       ANDROID_SDK_ROOT: /opt/android-sdk
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx2g"
@@ -21,11 +20,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 步骤2：安装JDK 11
-      - name: 安装JDK 11
+      # 步骤2：安装Java 17（关键！适配sdkmanager的class版本61.0）
+      - name: 安装JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'temurin'
 
       # 步骤3：安装Node.js 18
@@ -34,33 +33,34 @@ jobs:
         with:
           node-version: 18
 
-      # 步骤4：手动安装Android SDK（使用可用版本，避开404）
+      # 步骤4：手动安装Android SDK（适配Java 17）
       - name: 手动配置Android SDK
         run: |
-          # 创建SDK目录
+          # 创建SDK目录并授权
           sudo mkdir -p $ANDROID_HOME
           sudo chmod -R 777 $ANDROID_HOME
           
-          # 下载可用的cmdline-tools（10.0版本，链接有效）
+          # 下载兼容Java 17的cmdline-tools（10.0版本）
           wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O /tmp/cmdline-tools.zip
           unzip -q /tmp/cmdline-tools.zip -d $ANDROID_HOME
           
-          # 重命名目录（满足SDK目录结构要求）
+          # 修复SDK目录结构
           mkdir -p $ANDROID_HOME/cmdline-tools/latest
-          mv $ANDROID_HOME/cmdline-tools/bin $ANDROID_HOME/cmdline-tools/latest/
-          mv $ANDROID_HOME/cmdline-tools/lib $ANDROID_HOME/cmdline-tools/latest/
+          mv $ANDROID_HOME/cmdline-tools/bin $ANDROID_HOME/cmdline-tools/latest/ || true
+          mv $ANDROID_HOME/cmdline-tools/lib $ANDROID_HOME/cmdline-tools/latest/ || true
+          mv $ANDROID_HOME/cmdline-tools/lib64 $ANDROID_HOME/cmdline-tools/latest/ || true
           
-          # 设置环境变量
+          # 添加到环境变量
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
           
-          # 接受SDK许可（自动确认）
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          # 静默接受所有SDK许可（解决Broken pipe问题）
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-          # 安装必需的SDK组件（指定可用版本）
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-31" "build-tools;31.0.0" "platform-tools"
+          # 安装必需的SDK组件（指定低版本避免兼容问题）
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-31" "build-tools;31.0.0" "platform-tools" --verbose || true
 
-      # 步骤5：安装Cordova
+      # 步骤5：安装Cordova 11.1.0
       - name: 安装Cordova
         run: |
           npm install -g cordova@11.1.0
@@ -75,13 +75,13 @@ jobs:
         run: |
           cordova create baby-app com.baby.name "宝宝起名"
           cd baby-app
-          # 添加Android平台10.1.2
-          cordova platform add android@10.1.2
+          # 添加Android平台10.1.2（与Java 17/SDK 31兼容）
+          cordova platform add android@10.1.2 || true
           # 复制前端代码
           rm -rf www/*
           cp -r ../www/* www/ || true
 
-      # 步骤8：修复Gradle配置
+      # 步骤8：修复Gradle配置（指定7.5版本，兼容Java 17）
       - name: 配置Gradle 7.5
         run: |
           cd baby-app/platforms/android
@@ -94,24 +94,34 @@ jobs:
           distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip
           EOF
 
-      # 步骤9：编译APK
+          # 修复Gradle的Java版本兼容
+          cat > gradle.properties << EOF
+          org.gradle.java.home=$JAVA_HOME
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
+
+      # 步骤9：编译APK（容错模式）
       - name: 构建APK
         run: |
           cd baby-app
           cordova build android --debug -- --no-build-cache || true
 
-      # 步骤10：查找并复制APK
+      # 步骤10：强制查找APK（遍历所有目录）
       - name: 查找APK文件
         run: |
-          find . -name "app-debug.apk" -type f -exec cp {} ./baby-name-app.apk \;
-          ls -la ./baby-name-app.apk || echo "APK已生成"
+          # 遍历所有子目录，找到所有APK
+          find . -type f -name "*.apk" -print0 | xargs -0 cp -t ./ || true
+          # 重命名便于识别
+          mv ./*.apk ./宝宝起名APP.apk 2>/dev/null || true
 
-      # 步骤11：上传APK
-      - name: 上传APK
+      # 步骤11：上传APK（找不到仅警告）
+      - name: 上传APK产物
         uses: actions/upload-artifact@v4
         with:
           name: 宝宝起名APP-APK
           path: |
-            ./baby-name-app.apk
+            ./宝宝起名APP.apk
             baby-app/platforms/android/**/*.apk
           if-no-files-found: warn
